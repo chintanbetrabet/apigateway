@@ -10,5 +10,5 @@ publish:
 
 deploy:
 	#kubectl delete deploy gateway -n test 
-	kubectl apply -f pod.yaml
+	kubectl apply -f deploy.yaml
 				
