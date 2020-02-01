@@ -1,0 +1,45 @@
+port: 8000
+upstreams:
+  - name: remote1
+    hosts:
+      - url: http://remote_host
+        port: 8080
+  - name: consul-master
+    hosts:
+      - url: http://consul-master
+        port: 8500
+routes:
+  - name: accounts
+    location: /api/v1.2/account
+    beforeFilters:
+      - type: invalid
+  - name: v1.2commands
+    location: /api/v1.2/commands/
+    beforeFilters:
+      - type: auth
+        strategy: token
+      - type: throttle
+        strategy: basic
+  - name: cluster-proxy
+    location: /cluster-proxy
+    beforeFilters:
+      - type: auth
+        strategy: token
+  - name: jeeves
+    location: /jeeves/
+    beforeFilters:
+      - type: auth
+        strategy: session
+      - type: auth
+        strategy: token
+  - name: consul-ui
+    location: /consul/ui/
+    forwardUpstream: consul-master
+  - name: default
+    location: /
+    beforeFilters:
+      - type: auth
+        strategy: tugboat
+    afterFilters:
+      - type: headers
+        strategy: tugboat

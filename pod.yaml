@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: test
+  labels:
+    name: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: gateway
+  template:
+    metadata:
+      labels:
+        name: gateway
+    spec:
+      nodeSelector:
+        nodePoolType: gateway
+      containers:
+      - name: gateway
+        image: gcr.io/hybrid-qubole/api-gateway:2
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: 200Mi
+            cpu: 200m
+          limits:
+            cpu: 1000m
+        ports:
+        - containerPort: 8000
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: gateway
+  namespace: test
+spec:
+  selector:
+    name: gateway
+  type: ClusterIP
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 8000
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: redis
+  namespace: test
+spec:
+  selector:
+    name: redis
+  type: ClusterIP
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 6379
+  - name: redis
+    protocol: TCP
+    port: 6379
+    targetPort: 6379
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: test
+  labels:
+    name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: redis
+  template:
+    metadata:
+      labels:
+        name: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis
