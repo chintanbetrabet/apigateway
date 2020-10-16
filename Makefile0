@@ -1,0 +1,114 @@
+-include .env
+
+SHELL=/bin/bash -o pipefail
+GIT_TAG := $(shell git describe --tags --exact-match 2> /dev/null || git symbolic-ref -q --short HEAD)
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
+PROJECTNAME := $(shell basename "$(PWD)")
+BUILD_VARS_IMPORT_PATH := bitbucket.org/qubole/
+
+# Go related variables.
+GOBASE := $(shell pwd)
+GOFILES := $(wildcard *.go)
+
+# Use linker flags to provide version/build settings
+LDFLAGS=-ldflags "-s -w -X=${BUILD_VARS_IMPORT_PATH}.GitTag=$(GIT_TAG) -X=${BUILD_VARS_IMPORT_PATH}.GitCommit=$(GIT_COMMIT)"
+
+# Redirect error output to a file, so we can show it in development mode.
+STDERR := /tmp/.$(PROJECTNAME)-stderr.txt
+
+# Make is verbose in Linux. Make it silent.
+MAKEFLAGS += --silent
+
+## install: Install missing dependencies. Runs `go get` internally. e.g; make install get=github.com/foo/bar
+install: get
+
+## compile: Compile the binary.
+compile:
+	@-touch $(STDERR)
+	@-rm $(STDERR)
+	@-$(MAKE) -s clean 2> $(STDERR)
+	@-$(MAKE) -s get 2> $(STDERR)
+	@-$(MAKE) -s build 2> $(STDERR)
+	@cat $(STDERR) | sed -e '1s/.*/\nError:\n/'  | sed 's/make\[.*/ /' | sed "/^/s/^/     /" 1>&2
+
+## exec: Run given command, wrapped with custom GOPATH. e.g; make exec run="go test ./..."
+exec:
+	@GOPATH=$(GOPATH) GOBIN=$(GOBIN) $(run)
+
+## clean: Clean build files. Runs `go clean` internally.
+clean:
+	@-rm $(GOBIN)/$(PROJECTNAME) 2> /dev/null
+	@-$(MAKE) go-clean
+
+docker-build:
+	docker build . -t edith -f Dockerfile
+
+## generate cov report
+test-report:
+	@cat test-reports/report.txt | go-junit-report > ./test-reports/report.xml
+
+
+build:
+	@echo "  >  Building binary..."
+	go build $(LDFLAGS) -o ./$(PROJECTNAME) $(GOFILES)
+
+generate:
+	@echo "  >  Generating dependency files..."
+	go generate $(generate)
+
+get:
+	@echo "  >  Checking if there are any missing dependencies..."
+	go get $(get)
+
+install:
+	go install $(GOFILES)
+
+run:
+	@echo "  >  Starting Edith HTTP Server"
+	edith httpServer
+
+rinstall: compile run
+
+go-clean:
+	@echo "  >  Cleaning build cache"
+	go clean
+
+test:
+	@echo "  >  Running Tests"
+	mkdir -p test-reports
+	go test -parallel 10 ./... | tee test-reports/report.txt
+
+.PHONY: help
+all: help
+help: Makefile
+	@echo
+	@echo " Choose a command run in "$(PROJECTNAME)":"
+	@echo
+	@sed -n 's/^##//p' $< | column -t -s ':' |  sed -e 's/^/ /'
+	@echo
+
+PUBLISH_IMAGE_TAG ?= "test"
+docker-publish:
+	docker tag edith gcr.io/hybrid-qubole/edith:$(PUBLISH_IMAGE_TAG)
+	docker push gcr.io/hybrid-qubole/edith:$(PUBLISH_IMAGE_TAG)
+
+deploy:
+	kubectl apply -f deploy.yaml
+
+force-deploy:
+	kubectl delete deploy edith -n qubole-control
+	kubectl apply -f deploy.yaml
+
+local-deploy:
+	#kubectl delete deploy edith -n qubole-control --context docker-desktop
+	kubectl apply -f local-deploy.yaml --context docker-desktop
+	sleep 5
+	kubectl port-forward deployment/edith 3000:3000 -n qubole-control --context docker-desktop
+	
+test-cover: ## Run Tests with coverage report in ./test-reports folder
+	go clean -testcache
+	@echo "  >  Running Tests"
+	mkdir -p test-reports
+	go test -v -coverprofile=test-reports/coverage.out ./...
+	go tool cover -func=test-reports/coverage.out
+	go tool cover -html=test-reports/coverage.out
